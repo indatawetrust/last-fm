@@ -1,6 +1,8 @@
 const get = require('simple-get')
 const querystring = require('querystring')
 const parallel = require('run-parallel')
+const request = require('request')
+const cheerio = require('cheerio')
 
 const IMAGE_WEIGHT = {
   '': 1, // missing size is ranked last
@@ -119,19 +121,46 @@ class LastFM {
   }
 
   _parseTracks (tracks) {
-    return tracks
-      .map(track => {
-        const listeners = track.playcount || track.listeners
-        return {
-          type: 'track',
-          name: track.name,
-          artistName: track.artist.name || track.artist,
-          duration: track.duration && Number(track.duration), // optional
-          listeners: listeners && Number(listeners), // optional
-          images: track.image && this._parseImages(track.image) // optional
+
+    tracks = tracks.slice(0,5)
+
+    return Promise.all(tracks.map(track => new Promise((resolve, reject) => {
+
+      const listeners = track.playcount || track.listeners
+
+      request(track.url, (err, res, body) => {
+
+        if (body) {
+          const $ = cheerio.load(body)
+
+          resolve({
+            type: 'track',
+            name: track.name,
+            artistName: track.artist.name || track.artist,
+            duration: track.duration && Number(track.duration), // optional
+            listeners: listeners && Number(listeners), // optional
+            images: track.image && this._parseImages(track.image), // optional,
+            youtube_link: $('.image-overlay-playlink-link').attr('href')
+          })
+        } else {
+          const $ = cheerio.load(body)
+
+          resolve({
+            type: 'track',
+            name: track.name,
+            artistName: track.artist.name || track.artist,
+            duration: track.duration && Number(track.duration), // optional
+            listeners: listeners && Number(listeners), // optional
+            images: track.image && this._parseImages(track.image), // optional,
+            youtube_link: null
+          })
         }
+
       })
-      .filter(track => track.listeners == null || track.listeners >= this._minTrackListeners)
+
+    })))
+    .then(tracks => tracks.filter(track => track.youtube_link && (track.listeners == null || track.listeners >= this._minTrackListeners)))
+
   }
 
   /**
@@ -237,6 +266,7 @@ class LastFM {
     const params = {
       method: 'album.search',
       limit: opts.limit,
+      page: opts.page,
       album: opts.q
     }
     this._sendRequest(params, 'results', (err, data) => {
@@ -355,9 +385,11 @@ class LastFM {
     }
     this._sendRequest(params, 'toptracks', (err, data) => {
       if (err) return cb(err)
-      cb(null, {
-        meta: this._parseMeta(data, opts),
-        result: this._parseTracks(data.track)
+      this._parseTracks(data.track).then(result => {
+        cb(null, {
+          meta: this._parseMeta(data, opts),
+          result
+        })
       })
     })
   }
@@ -369,6 +401,7 @@ class LastFM {
     const params = {
       method: 'artist.search',
       limit: opts.limit,
+      page: opts.page,
       artist: opts.q
     }
     this._sendRequest(params, 'results', (err, data) => {
@@ -388,6 +421,7 @@ class LastFM {
     const params = {
       method: 'chart.getTopArtists',
       limit: opts.limit,
+      page: opts.page,
       autocorrect: 1
     }
     this._sendRequest(params, 'artists', (err, data) => {
@@ -403,6 +437,7 @@ class LastFM {
     const params = {
       method: 'chart.getTopTags',
       limit: opts.limit,
+      page: opts.page,
       autocorrect: 1
     }
     this._sendRequest(params, 'tags', cb)
@@ -412,6 +447,7 @@ class LastFM {
     const params = {
       method: 'chart.getTopTracks',
       limit: opts.limit,
+      page: opts.page,
       autocorrect: 1
     }
     this._sendRequest(params, 'tracks', (err, data) => {
@@ -435,6 +471,7 @@ class LastFM {
       method: 'geo.getTopArtists',
       country: opts.country,
       limit: opts.limit,
+      page: opts.page,
       autocorrect: 1
     }
     this._sendRequest(params, 'topartists', cb)
@@ -448,6 +485,7 @@ class LastFM {
       method: 'geo.getTopTracks',
       country: opts.country,
       limit: opts.limit,
+      page: opts.page,
       autocorrect: 1
     }
     this._sendRequest(params, 'tracks', cb)
@@ -486,6 +524,7 @@ class LastFM {
     const params = {
       method: 'tag.getTopAlbums',
       limit: opts.limit,
+      page: opts.page,
       tag: opts.tag
     }
     this._sendRequest(params, 'albums', cb)
@@ -498,6 +537,7 @@ class LastFM {
     const params = {
       method: 'tag.getTopArtists',
       limit: opts.limit,
+      page: opts.page,
       tag: opts.tag
     }
     this._sendRequest(params, 'topartists', cb)
@@ -517,6 +557,7 @@ class LastFM {
     const params = {
       method: 'tag.getTopTracks',
       limit: opts.limit,
+      page: opts.page,
       tag: opts.tag
     }
     this._sendRequest(params, 'tracks', cb)
@@ -603,6 +644,7 @@ class LastFM {
     const params = {
       method: 'track.search',
       limit: opts.limit,
+      page: opts.page,
       track: opts.q
     }
     this._sendRequest(params, 'results', (err, data) => {
